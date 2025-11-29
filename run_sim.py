@@ -26,6 +26,7 @@ ROBOT_RADIUS = 0.23
 CIRCLE_OBSTACLES = [
     {"center": (0.35, 0.25), "radius": 0.10 + ROBOT_RADIUS},  # radius from XML + margin
 ]
+OBSTACLE_STOP_MARGIN = 0.02  # extra detection layer
 
 random.seed(3)
 
@@ -81,6 +82,16 @@ def point_in_collision(point: Sequence[float]) -> bool:
             return True
 
     return False
+
+
+def detect_nearby_obstacle(sim: StretchMujocoSimulator) -> dict | None:
+    """Check live base pose against obstacle list; return obstacle dict if too close."""
+    x, y, _ = sim.get_base_pose()
+    for obs in CIRCLE_OBSTACLES:
+        cx, cy = obs["center"]
+        if math.hypot(x - cx, y - cy) <= obs["radius"] + OBSTACLE_STOP_MARGIN:
+            return obs
+    return None
 
 
 def edge_in_collision(p1: Sequence[float], p2: Sequence[float], step: float = 0.05) -> bool:
@@ -181,6 +192,12 @@ def move_base_to(
         dx = target_xy[0] - x
         dy = target_xy[1] - y
         dist = math.hypot(dx, dy)
+
+        obstacle = detect_nearby_obstacle(sim)
+        if obstacle:
+            print(f"Obstacle detected near {obstacle['center']} — stopping base.")
+            break
+
         if dist <= pos_tol:
             break
 
@@ -205,6 +222,9 @@ def execute_base_path(sim: StretchMujocoSimulator, path: List[Tuple[float, float
     for idx, waypoint in enumerate(path[1:], start=1):
         print(f"  -> Waypoint {idx}/{len(path) - 1}: {waypoint}")
         move_base_to(sim, waypoint)
+        if detect_nearby_obstacle(sim):
+            print("Navigation halted because an obstacle is too close.")
+            break
     sim.set_base_velocity(0.0, 0.0)
 
 
@@ -256,7 +276,10 @@ def main() -> None:
 
     run_manipulation_sequence(sim)
 
-    print("Robot is at goal. Press ENTER to exit.")
+    if detect_nearby_obstacle(sim):
+        print("Robot stopped early due to obstacle detection. Press ENTER to exit.")
+    else:
+        print("Robot is at goal. Press ENTER to exit.")
     input()
     sim.stop()
 
