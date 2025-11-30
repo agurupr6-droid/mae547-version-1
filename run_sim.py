@@ -13,8 +13,13 @@ from stretch_mujoco.enums.actuators import Actuators
 #  ENV + RRT CONFIGURATION
 # ---------------------------------------------------------------------------
 
-# Goal is the blue box defined in models/scene.xml
-GOAL_POSITION = (1.20, 0.00)
+# Object pose (center of the blue block from scene.xml)
+OBJECT_POSITION = (1.20, 0.00)
+OBJECT_HEIGHT = 0.40
+
+# Desired standoff distance so the arm can reach straight forward to the block
+ARM_REACH_TARGET = 0.58  # meters of effective arm extension to the block centerline
+BASE_GOAL_POSITION = (OBJECT_POSITION[0] - ARM_REACH_TARGET, OBJECT_POSITION[1] - 0.05)
 
 # Bounds that enclose the useful driving workspace (meters)
 WORKSPACE_BOUNDS = (-0.5, 1.8, -1.0, 1.0)  # xmin, xmax, ymin, ymax
@@ -24,9 +29,10 @@ ROBOT_RADIUS = 0.23
 
 # Obstacles present in the scene (red cylinder, etc.)
 CIRCLE_OBSTACLES = [
-    {"center": (0.35, 0.25), "radius": 0.10 + ROBOT_RADIUS},  # radius from XML + margin
+    {"center": (0.35, 0.25), "radius": 0.10 + ROBOT_RADIUS},  # red cylinder
+    {"center": OBJECT_POSITION, "radius": 0.25},  # keep base off the table surface
 ]
-OBSTACLE_STOP_MARGIN = 0.02  # extra detection layer
+OBSTACLE_STOP_MARGIN = -0.05  # shrink runtime detection radius to avoid false positives
 
 random.seed(3)
 
@@ -184,7 +190,7 @@ def move_base_to(
     target_xy: Tuple[float, float],
     linear_speed: float = 0.6,
     angular_speed: float = 1.2,
-) -> None:
+) -> bool:
     pos_tol = 0.03
     heading_tol = 0.02
     while sim.is_running():
@@ -195,8 +201,9 @@ def move_base_to(
 
         obstacle = detect_nearby_obstacle(sim)
         if obstacle:
-            print(f"Obstacle detected near {obstacle['center']} — stopping base.")
-            break
+            print(f"Obstacle detected near {obstacle['center']} — pausing to replan.")
+            sim.set_base_velocity(0.0, 0.0)
+            return False
 
         if dist <= pos_tol:
             break
@@ -213,34 +220,108 @@ def move_base_to(
         time.sleep(0.02)
 
     sim.set_base_velocity(0.0, 0.0)
+    return True
 
 
-def execute_base_path(sim: StretchMujocoSimulator, path: List[Tuple[float, float]]) -> None:
+def execute_base_path(
+    sim: StretchMujocoSimulator,
+    path: List[Tuple[float, float]],
+    final_goal: Tuple[float, float],
+    max_replans: int = 3,
+) -> bool:
     if len(path) <= 1:
-        return
-    print(f"Executing {len(path)} waypoints...")
-    for idx, waypoint in enumerate(path[1:], start=1):
+        return True
+
+    replans = 0
+    idx = 1
+
+    while idx < len(path):
+        waypoint = path[idx]
         print(f"  -> Waypoint {idx}/{len(path) - 1}: {waypoint}")
-        move_base_to(sim, waypoint)
-        if detect_nearby_obstacle(sim):
-            print("Navigation halted because an obstacle is too close.")
-            break
+        reached = move_base_to(sim, waypoint)
+        if reached:
+            idx += 1
+            continue
+
+        if replans >= max_replans:
+            print("Maximum replans reached; aborting this path.")
+            sim.set_base_velocity(0.0, 0.0)
+            return False
+
+        replans += 1
+        current_xy = sim.get_base_pose()[:2]
+        print(f"    Replanning path ({replans}/{max_replans}) from {current_xy} to {final_goal}...")
+        try:
+            path = plan_rrt_path(current_xy, final_goal, RRTParams())
+            print(f"    New path has {len(path)} waypoints.")
+            idx = 1
+        except RuntimeError as err:
+            print(f"    Replan failed: {err}")
+            sim.set_base_velocity(0.0, 0.0)
+            return False
+
     sim.set_base_velocity(0.0, 0.0)
+    return True
 
 
 def run_manipulation_sequence(sim: StretchMujocoSimulator) -> None:
-    """Simple arm motion to show the robot can work at the goal."""
-    print("Preparing manipulator for pickup demo...")
-    sim.move_to(Actuators.gripper, 0.04)
+    """Drive the arm to grasp the blue block and hold it securely."""
+    lift_approach = OBJECT_HEIGHT + 0.06
+    lift_pick = OBJECT_HEIGHT + 0.01
+    lift_carry = 0.70
+    arm_extend = ARM_REACH_TARGET + 0.02
+    arm_carry = 0.34
+
+    print("Opening gripper...")
+    sim.move_to(Actuators.gripper, 0.045)
     sim.wait_until_at_setpoint(Actuators.gripper)
 
+    print("Lowering wrist and lift to picking height...")
     sim.move_to(Actuators.wrist_yaw, 0.0)
-    sim.move_to(Actuators.lift, 0.55)
-    sim.move_to(Actuators.arm, 0.45)
+    sim.move_to(Actuators.lift, lift_approach)
+    sim.wait_until_at_setpoint(Actuators.lift)
 
+    print("Extending arm toward the block...")
+    sim.move_to(Actuators.arm, arm_extend)
+    sim.wait_until_at_setpoint(Actuators.arm)
+
+    print("Dropping lift slightly to wrap around the block...")
+    sim.move_to(Actuators.lift, lift_pick)
+    sim.wait_until_at_setpoint(Actuators.lift)
+    time.sleep(0.1)
+
+    print("Closing gripper to grasp object...")
+    sim.move_to(Actuators.gripper, 0.0)
+    sim.wait_until_at_setpoint(Actuators.gripper)
+    time.sleep(0.2)
+
+    print("Lifting object and retracting for travel...")
+    sim.move_to(Actuators.lift, lift_carry)
+    sim.move_to(Actuators.arm, arm_carry)
     sim.wait_until_at_setpoint(Actuators.lift)
     sim.wait_until_at_setpoint(Actuators.arm)
-    time.sleep(0.4)
+    time.sleep(0.2)
+
+
+def align_base_heading(sim: StretchMujocoSimulator, target_theta: float, angular_speed: float = 1.0) -> None:
+    """Rotate the base back to its desired heading."""
+    heading_tol = 0.015
+    while sim.is_running():
+        _, _, theta = sim.get_base_pose()
+        error = wrap_angle(target_theta - theta)
+        if abs(error) < heading_tol:
+            break
+        omega = angular_speed if error > 0 else -angular_speed
+        sim.set_base_velocity(0.0, omega)
+        time.sleep(0.02)
+    sim.set_base_velocity(0.0, 0.0)
+
+
+def face_point(sim: StretchMujocoSimulator, target_xy: Tuple[float, float], angular_speed: float = 1.0) -> None:
+    """Rotate the base so it faces the provided XY point."""
+    x, y, theta = sim.get_base_pose()
+    desired_heading = math.atan2(target_xy[1] - y, target_xy[0] - x)
+    align_base_heading(sim, desired_heading, angular_speed)
 
 
 # ---------------------------------------------------------------------------
@@ -260,8 +341,10 @@ def main() -> None:
     sim.home()
     time.sleep(1.0)
 
-    start_xy = sim.get_base_pose()[:2]
-    goal_xy = GOAL_POSITION
+    start_pose = sim.get_base_pose()
+    start_xy = start_pose[:2]
+    start_heading = start_pose[2]
+    goal_xy = BASE_GOAL_POSITION
 
     print("Planning RRT base path...")
     try:
@@ -272,14 +355,34 @@ def main() -> None:
         return
 
     print(f"Planned path with {len(path)} waypoints.")
-    execute_base_path(sim, path)
+    reached_goal = execute_base_path(sim, path, goal_xy)
 
+    if not reached_goal:
+        print("Could not reach goal because an obstacle was detected. Press ENTER to exit.")
+        input()
+        sim.stop()
+        return
+
+    face_point(sim, OBJECT_POSITION)
     run_manipulation_sequence(sim)
 
-    if detect_nearby_obstacle(sim):
-        print("Robot stopped early due to obstacle detection. Press ENTER to exit.")
+    print("Planning return path to start pose...")
+    try:
+        return_path = plan_rrt_path(sim.get_base_pose()[:2], start_xy, RRTParams())
+    except RuntimeError as err:
+        print(f"Return path planning failed: {err}")
+        print("Robot will stay near the object. Press ENTER to exit.")
+        input()
+        sim.stop()
+        return
+
+    returned_home = execute_base_path(sim, return_path, start_xy)
+    align_base_heading(sim, start_heading)
+
+    if returned_home:
+        print("Back at start pose with the block in hand. Press ENTER to exit.")
     else:
-        print("Robot is at goal. Press ENTER to exit.")
+        print("Return path interrupted by obstacle detection. Press ENTER to exit.")
     input()
     sim.stop()
 
