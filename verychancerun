@@ -1,0 +1,380 @@
+import math
+import random
+import time
+from dataclasses import dataclass
+from typing import List, Sequence, Tuple
+
+import numpy as np  # <-- NEW
+from stretch_mujoco import StretchMujocoSimulator
+from stretch_mujoco.enums.actuators import Actuators
+
+# ---------------------------------------------------------------------------
+#  ARM FK, IK, AND JOINT-SPACE RRT
+# ---------------------------------------------------------------------------
+
+# We'll plan in a small joint space for the arm.
+# Here we use [lift, arm, wrist_yaw] as our configuration vector.
+ARM_JOINT_ORDER = [Actuators.lift, Actuators.arm, Actuators.wrist_yaw]
+
+# Conservative joint limits (adjust to match your robot)
+ARM_JOINT_LIMITS = {
+    Actuators.lift: (0.0, 1.1),
+    Actuators.arm: (0.0, 0.8),
+    Actuators.wrist_yaw: (-math.pi, math.pi),
+}
+
+
+def arm_q_clamp(q: np.ndarray) -> np.ndarray:
+    """Clamp joint vector to limits."""
+    q = q.copy()
+    for i, joint in enumerate(ARM_JOINT_ORDER):
+        lo, hi = ARM_JOINT_LIMITS[joint]
+        q[i] = float(np.clip(q[i], lo, hi))
+    return q
+
+
+def get_arm_configuration(sim: StretchMujocoSimulator) -> np.ndarray:
+    """
+    Return current arm joint configuration as [lift, arm, wrist_yaw].
+
+    TODO: replace the 'sim.get_...' calls with your real API for reading joint positions.
+    For a quick hack, you can cache commanded values instead.
+    """
+    # Example stub: assumes the simulator exposes get_actuator_position(actuator)
+    return np.array(
+        [
+            sim.get_actuator_position(joint)  # TODO: implement / replace
+            for joint in ARM_JOINT_ORDER
+        ],
+        dtype=float,
+    )
+
+
+def set_arm_configuration(sim: StretchMujocoSimulator, q: np.ndarray, blocking: bool = False) -> None:
+    """
+    Command arm joints to configuration q.
+
+    This uses sim.move_to() which you already use in run_manipulation_sequence.
+    """
+    q = arm_q_clamp(q)
+    for value, joint in zip(q, ARM_JOINT_ORDER):
+        sim.move_to(joint, float(value))
+    if blocking:
+        for joint in ARM_JOINT_ORDER:
+            sim.wait_until_at_setpoint(joint)
+
+
+# --- FK: joint config -> EE pose (x, y, theta) in world frame ----------------
+
+def fk_end_effector(sim: StretchMujocoSimulator, q: np.ndarray) -> np.ndarray:
+    """
+    Compute end-effector pose (x, y, theta) for a given joint vector q.
+
+    TODO: hook this to your MuJoCo model. The typical pattern is:
+      - set joints to q (without advancing time)
+      - sim.forward()
+      - read pose of an end-effector site or body
+
+    For now, this is written as a stub that assumes a helper
+    `sim.set_arm_state_for_kinematics(q)` and `sim.get_ee_pose_2d()`.
+    Replace those with your real calls.
+    """
+    q = arm_q_clamp(q)
+
+    # --- TODO: set joints and call forward kinematics in MuJoCo ---
+    sim.set_arm_state_for_kinematics(q)   # TODO: implement in your wrapper
+    sim.forward()                          # if your wrapper exposes this
+
+    # --- TODO: read EE pose from MuJoCo (x, y, theta) ---
+    x, y, theta = sim.get_ee_pose_2d()    # TODO: implement in your wrapper
+
+    return np.array([x, y, theta], dtype=float)
+
+
+# --- IK: end-effector pose -> joint config -----------------------------------
+
+def ik_solve(
+    sim: StretchMujocoSimulator,
+    target_pose: np.ndarray,
+    q_seed: np.ndarray,
+    max_iters: int = 80,
+    step_size: float = 0.08,
+    tol: float = 1e-3,
+) -> np.ndarray | None:
+    """
+    Very simple Jacobian-free numerical IK:
+    repeatedly adjust q to reduce (x, y, theta) error using FK.
+
+    target_pose: np.array([x, y, theta])
+    q_seed:      initial guess
+    """
+    q = arm_q_clamp(q_seed)
+
+    for _ in range(max_iters):
+        current = fk_end_effector(sim, q)
+        err = target_pose - current
+        err[2] = wrap_angle(err[2])  # normalize heading error
+
+        if np.linalg.norm(err) < tol:
+            return arm_q_clamp(q)
+
+        # Approximate gradient w.r.t each joint using finite differences
+        grad = np.zeros_like(q)
+        eps = 1e-3
+        for i in range(len(q)):
+            q_pert = q.copy()
+            q_pert[i] += eps
+            pose_pert = fk_end_effector(sim, q_pert)
+            delta_pose = pose_pert - current
+            delta_pose[2] = wrap_angle(delta_pose[2])
+            # project pose change onto error
+            grad[i] = float(np.dot(delta_pose, err) / (eps + 1e-9))
+
+        # Gradient descent step
+        q += step_size * grad
+        q = arm_q_clamp(q)
+
+    # Did not converge
+    return None
+
+
+# --- Collision checking in joint space ---------------------------------------
+
+def arm_config_in_collision(sim: StretchMujocoSimulator, q: np.ndarray) -> bool:
+    """
+    Return True if arm configuration q is in collision.
+
+    TODO: This is where you use MuJoCo contact info.
+
+    A typical implementation:
+      set_arm_configuration (without sending velocities),
+      sim.forward(),
+      then check sim.data.ncon and filter contacts.
+
+    For now, we just return False so the planner ignores arm collisions.
+    Fill this in when you’re ready.
+    """
+    # Example placeholder:
+    return False  # TODO: implement proper collision checking
+
+
+def arm_edge_in_collision(sim: StretchMujocoSimulator, q1: np.ndarray, q2: np.ndarray, num_checks: int = 10) -> bool:
+    """Discretize the edge q1->q2 and check intermediate configs for collision."""
+    for alpha in np.linspace(0.0, 1.0, num_checks):
+        q = (1.0 - alpha) * q1 + alpha * q2
+        if arm_config_in_collision(sim, q):
+            return True
+    return False
+
+
+# --- RRT in arm joint space ---------------------------------------------------
+
+@dataclass
+class ArmRRTParams:
+    step_size: float = 0.08
+    max_iters: int = 2000
+    goal_sample_rate: float = 0.2
+    goal_threshold: float = 0.05
+
+
+@dataclass
+class ArmRRTNode:
+    q: np.ndarray
+    parent: int | None
+
+
+def arm_dist(q1: np.ndarray, q2: np.ndarray) -> float:
+    return float(np.linalg.norm(q1 - q2))
+
+
+def arm_sample_config() -> np.ndarray:
+    return np.array(
+        [
+            random.uniform(*ARM_JOINT_LIMITS[joint])
+            for joint in ARM_JOINT_ORDER
+        ],
+        dtype=float,
+    )
+
+
+def arm_steer(q_from: np.ndarray, q_to: np.ndarray, step: float) -> np.ndarray:
+    d = arm_dist(q_from, q_to)
+    if d <= step:
+        return arm_q_clamp(q_to)
+    direction = (q_to - q_from) / (d + 1e-9)
+    return arm_q_clamp(q_from + step * direction)
+
+
+def arm_plan_rrt(
+    sim: StretchMujocoSimulator,
+    q_start: np.ndarray,
+    q_goal: np.ndarray,
+    params: ArmRRTParams,
+) -> List[np.ndarray]:
+    """Plan a collision-free path in joint space from q_start to q_goal."""
+    if arm_config_in_collision(sim, q_start):
+        raise RuntimeError("Arm start configuration is in collision.")
+    if arm_config_in_collision(sim, q_goal):
+        raise RuntimeError("Arm goal configuration is in collision.")
+
+    nodes: List[ArmRRTNode] = [ArmRRTNode(q=q_start.copy(), parent=None)]
+
+    for _ in range(params.max_iters):
+        if random.random() < params.goal_sample_rate:
+            q_sample = q_goal.copy()
+        else:
+            q_sample = arm_sample_config()
+
+        # nearest node
+        dists = [arm_dist(n.q, q_sample) for n in nodes]
+        nearest = int(min(range(len(dists)), key=dists.__getitem__))
+        q_near = nodes[nearest].q
+
+        # extend
+        q_new = arm_steer(q_near, q_sample, params.step_size)
+
+        if arm_config_in_collision(sim, q_new):
+            continue
+        if arm_edge_in_collision(sim, q_near, q_new):
+            continue
+
+        nodes.append(ArmRRTNode(q=q_new, parent=nearest))
+
+        # goal check
+        if arm_dist(q_new, q_goal) < params.goal_threshold and not arm_edge_in_collision(sim, q_new, q_goal):
+            nodes.append(ArmRRTNode(q=q_goal.copy(), parent=len(nodes) - 1))
+            return arm_extract_path(nodes, len(nodes) - 1)
+
+    raise RuntimeError("Arm RRT failed to find a collision-free path.")
+
+
+def arm_extract_path(nodes: List[ArmRRTNode], goal_idx: int) -> List[np.ndarray]:
+    ordered: List[np.ndarray] = []
+    idx: int | None = goal_idx
+    while idx is not None:
+        ordered.append(nodes[idx].q)
+        idx = nodes[idx].parent
+    ordered.reverse()
+    return ordered
+
+
+def execute_arm_path(sim: StretchMujocoSimulator, path: List[np.ndarray]) -> None:
+    """Execute a joint-space path by sending position commands to each waypoint."""
+    if not path:
+        return
+    for i, q in enumerate(path):
+        print(f"  [ARM] Waypoint {i+1}/{len(path)}: {q}")
+        set_arm_configuration(sim, q, blocking=True)
+        time.sleep(0.05)
+
+
+def run_manipulation_with_rrt(sim: StretchMujocoSimulator) -> None:
+    """
+    Example high-level function:
+    - define an EE pose above the block
+    - IK to get goal joint config
+    - RRT in joint space
+    - execute path
+    - then close gripper and lift, similar to your scripted sequence
+    """
+    # 1) Define target EE pose in world frame.
+    # We assume the base is already facing the object and roughly positioned.
+    x_target, y_target = OBJECT_POSITION
+    theta_target = 0.0  # end-effector facing straight forward
+    target_pose = np.array([x_target, y_target, theta_target], dtype=float)
+
+    # 2) IK to get joint-space goal
+    q_start = get_arm_configuration(sim)
+    print("[ARM] Solving IK to reach block...")
+    q_goal = ik_solve(sim, target_pose, q_start)
+    if q_goal is None:
+        print("[ARM] IK failed; falling back to scripted manipulation.")
+        run_manipulation_sequence(sim)
+        return
+
+    # 3) RRT in joint space
+    print("[ARM] Planning joint-space RRT path...")
+    params = ArmRRTParams()
+    try:
+        arm_path = arm_plan_rrt(sim, q_start, q_goal, params)
+    except RuntimeError as err:
+        print(f"[ARM] RRT planning failed: {err}; falling back to scripted manipulation.")
+        run_manipulation_sequence(sim)
+        return
+
+    print(f"[ARM] Planned joint path with {len(arm_path)} waypoints. Executing...")
+    execute_arm_path(sim, arm_path)
+
+    # 4) Close gripper & lift (re-use your existing logic)
+    print("[ARM] Closing gripper and lifting (same as scripted sequence)...")
+    sim.move_to(Actuators.gripper, 0.0)
+    sim.wait_until_at_setpoint(Actuators.gripper)
+
+    sim.move_to(Actuators.lift, 0.70)
+    sim.wait_until_at_setpoint(Actuators.lift)
+    time.sleep(0.2)
+
+def main() -> None:
+    sim = StretchMujocoSimulator()
+
+    print("Starting simulator...")
+    sim.start(headless=False)
+
+    if not sim.is_running():
+        print("Failed to start simulator.")
+        return
+
+    sim.home()
+    time.sleep(1.0)
+
+    start_pose = sim.get_base_pose()
+    start_xy = start_pose[:2]
+    start_heading = start_pose[2]
+    goal_xy = BASE_GOAL_POSITION
+
+    print("Planning RRT base path...")
+    try:
+        path = plan_rrt_path(start_xy, goal_xy, RRTParams())
+    except RuntimeError as err:
+        print(f"RRT planning failed: {err}")
+        sim.stop()
+        return
+
+    print(f"Planned path with {len(path)} waypoints.")
+    reached_goal = execute_base_path(sim, path, goal_xy)
+
+    if not reached_goal:
+        print("Could not reach goal because an obstacle was detected. Press ENTER to exit.")
+        input()
+        sim.stop()
+        return
+
+    face_point(sim, OBJECT_POSITION, compensate_arm_offset=True)
+
+    # Use FK + IK + joint-space RRT for the arm.
+    # If IK/RRT fail, we automatically fall back to your scripted sequence.
+    run_manipulation_with_rrt(sim)
+
+    print("Planning return path to start pose...")
+    try:
+        return_path = plan_rrt_path(sim.get_base_pose()[:2], start_xy, RRTParams())
+    except RuntimeError as err:
+        print(f"Return path planning failed: {err}")
+        print("Robot will stay near the object. Press ENTER to exit.")
+        input()
+        sim.stop()
+        return
+
+    returned_home = execute_base_path(sim, return_path, start_xy)
+    align_base_heading(sim, start_heading)
+
+    if returned_home:
+        print("Back at start pose with the block in hand. Press ENTER to exit.")
+    else:
+        print("Return path interrupted by obstacle detection. Press ENTER to exit.")
+    input()
+    sim.stop()
+
+
+if __name__ == "__main__":
+    main()

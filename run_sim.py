@@ -14,12 +14,18 @@ from stretch_mujoco.enums.actuators import Actuators
 # ---------------------------------------------------------------------------
 
 # Object pose (center of the blue block from scene.xml)
-OBJECT_POSITION = (1.20, 0.00)
+# Adjusted Y slightly to account for gripper alignment
+OBJECT_POSITION = (1.20, 0.10)
 OBJECT_HEIGHT = 0.40
 
 # Desired standoff distance so the arm can reach straight forward to the block
 ARM_REACH_TARGET = 0.58  # meters of effective arm extension to the block centerline
 BASE_GOAL_POSITION = (OBJECT_POSITION[0] - ARM_REACH_TARGET, OBJECT_POSITION[1] - 0.05)
+
+# Offset between the base center and the arm column mount (from stretch.xml @ link_lift).
+# The lateral component matters for aligning the gripper with the block without scraping.
+# Increased to ensure gripper clears the table edge when approaching the block.
+ARM_MOUNT_LATERAL_OFFSET = 0.60
 
 # Bounds that enclose the useful driving workspace (meters)
 WORKSPACE_BOUNDS = (-0.5, 1.8, -1.0, 1.0)  # xmin, xmax, ymin, ymax
@@ -185,6 +191,27 @@ def wrap_angle(angle: float) -> float:
     return (angle + math.pi) % (2 * math.pi) - math.pi
 
 
+def heading_with_lateral_offset(
+    base_xy: Tuple[float, float], target_xy: Tuple[float, float], lateral_offset: float
+) -> float:
+    """
+    Compute heading so the base's forward axis (and thus the arm) points to the target,
+    compensating for the arm column sitting off-center on the chassis.
+    """
+    dx = target_xy[0] - base_xy[0]
+    dy = target_xy[1] - base_xy[1]
+    if abs(lateral_offset) < 1e-6:
+        return math.atan2(dy, dx)
+
+    dist_sq = dx * dx + dy * dy
+    # If we're essentially on top of the target, fall back to the naive heading.
+    if dist_sq <= lateral_offset * lateral_offset + 1e-8:
+        return math.atan2(dy, dx)
+
+    forward_component = math.sqrt(max(dist_sq - lateral_offset * lateral_offset, 1e-8))
+    return wrap_angle(math.atan2(dy, dx) + math.atan2(lateral_offset, forward_component))
+
+
 def move_base_to(
     sim: StretchMujocoSimulator,
     target_xy: Tuple[float, float],
@@ -266,14 +293,14 @@ def execute_base_path(
 
 def run_manipulation_sequence(sim: StretchMujocoSimulator) -> None:
     """Drive the arm to grasp the blue block and hold it securely."""
-    lift_approach = OBJECT_HEIGHT + 0.06
-    lift_pick = OBJECT_HEIGHT + 0.01
+    lift_approach = OBJECT_HEIGHT - 0.12
+    lift_pick = OBJECT_HEIGHT - 0.16
     lift_carry = 0.70
-    arm_extend = ARM_REACH_TARGET + 0.02
+    arm_extend = ARM_REACH_TARGET - 0.30  # Position gripper to close around block
     arm_carry = 0.34
 
     print("Opening gripper...")
-    sim.move_to(Actuators.gripper, 0.045)
+    sim.move_to(Actuators.gripper, 0.09)  # Open wider to grab the block
     sim.wait_until_at_setpoint(Actuators.gripper)
 
     print("Lowering wrist and lift to picking height...")
@@ -281,8 +308,13 @@ def run_manipulation_sequence(sim: StretchMujocoSimulator) -> None:
     sim.move_to(Actuators.lift, lift_approach)
     sim.wait_until_at_setpoint(Actuators.lift)
 
-    print("Extending arm toward the block...")
-    sim.move_to(Actuators.arm, arm_extend)
+    print("Extending arm toward the block slowly...")
+    # Extend in smaller increments to avoid pushing the block
+    current_arm = 0.0
+    while current_arm < arm_extend:
+        current_arm = min(current_arm + 0.05, arm_extend)
+        sim.move_to(Actuators.arm, current_arm)
+        time.sleep(0.15)
     sim.wait_until_at_setpoint(Actuators.arm)
 
     print("Dropping lift slightly to wrap around the block...")
@@ -317,10 +349,20 @@ def align_base_heading(sim: StretchMujocoSimulator, target_theta: float, angular
     sim.set_base_velocity(0.0, 0.0)
 
 
-def face_point(sim: StretchMujocoSimulator, target_xy: Tuple[float, float], angular_speed: float = 1.0) -> None:
+def face_point(
+    sim: StretchMujocoSimulator,
+    target_xy: Tuple[float, float],
+    angular_speed: float = 1.0,
+    compensate_arm_offset: bool = False,
+) -> None:
     """Rotate the base so it faces the provided XY point."""
-    x, y, theta = sim.get_base_pose()
-    desired_heading = math.atan2(target_xy[1] - y, target_xy[0] - x)
+    x, y, _ = sim.get_base_pose()
+    if compensate_arm_offset:
+        desired_heading = heading_with_lateral_offset(
+            (x, y), target_xy, ARM_MOUNT_LATERAL_OFFSET
+        )
+    else:
+        desired_heading = math.atan2(target_xy[1] - y, target_xy[0] - x)
     align_base_heading(sim, desired_heading, angular_speed)
 
 
@@ -363,7 +405,7 @@ def main() -> None:
         sim.stop()
         return
 
-    face_point(sim, OBJECT_POSITION)
+    face_point(sim, OBJECT_POSITION, compensate_arm_offset=True)
     run_manipulation_sequence(sim)
 
     print("Planning return path to start pose...")
