@@ -15,7 +15,6 @@ This repository provides a simulation stack for the Stretch robot, built on [MuJ
 - **Position & Velocity Control**: Control arm, head, gripper, and mobile base
 - **Camera & Sensor Data**: Access to RGB, depth imagery, and lidar scans
 - **Visualizer Support**: Interactive visualizer or efficient headless mode
-- **Robocasa Environments**: 100s of permutations of kitchen environments
 
 ## Prerequisites
 
@@ -43,14 +42,12 @@ After installation, restart your terminal or reload your shell configuration.
 
 ### 2. Clone the Repository
 
-Clone this repository with submodules:
+Clone this repository:
 
 ```bash
-git clone https://github.com/hello-robot/stretch_mujoco --recurse-submodules
-cd stretch_mujoco
+git clone <repository-url>
+cd mae547-version-1
 ```
-
-> **Note**: If you've already cloned the repo without `--recurse-submodules`, run `git submodule update --init` to pull the submodules.
 
 ### 3. Set Up Virtual Environment and Install Dependencies
 
@@ -77,16 +74,6 @@ uv pip list
 
 ## Running the Simulation
 
-### Basic Simulation Launch
-
-To launch the basic simulation:
-
-```bash
-uv run launch_sim
-```
-
-This will start the MuJoCo visualizer with the Stretch robot. Press `Ctrl+C` in the terminal to exit.
-
 ### Run RRT Path Planning Simulation
 
 To run the main RRT path planning simulation:
@@ -102,37 +89,7 @@ This script will:
 4. Perform manipulation (grasping) sequence
 5. Return to the starting position
 
-### Step-by-Step Tutorial Scripts
-
-The repository includes step-by-step scripts for learning the system:
-
-1. **Inspect Joints**: `uv run step1_inspect_joints.py`
-2. **Interpolate Path**: `uv run step2_interpolate_path.py`
-3. **Collision Check**: `uv run step3_collision_check.py`
-4. **RRT Planner**: `uv run step4_rrt_planner.py`
-5. **Execute RRT**: `uv run step5_execute_rrt.py`
-
-### Example Scripts
-
-**Keyboard Teleop:**
-```bash
-uv run examples/keyboard_teleop.py
-```
-
-**Gamepad Teleop:**
-```bash
-uv run examples/gamepad_teleop.py
-```
-
-**Camera Feeds:**
-```bash
-uv run examples/camera_feeds.py
-```
-
-**Move Joints:**
-```bash
-uv run examples/move_joints.py
-```
+Press `Ctrl+C` in the terminal to exit the simulation.
 
 ## Switching Between Scenarios
 
@@ -185,7 +142,7 @@ This repository contains multiple branches, each representing a different simula
 Each branch contains scenario-specific modifications:
 - **version_2** (Scenario 2): Modified `run_sim.py` with scenario-specific parameters
 - **version_3** (Scenario 1): Modified `run_sim.py` with scenario-specific parameters
-- **version_4** (Scenario 3): Modified `run_sim.py`, `scene.xml`, and includes additional RRT planning files (`rrt2d.py`, `rrt2drep.py`, etc.)
+- **version_4** (Scenario 3): Modified `run_sim.py` and `scene.xml` with scenario-specific parameters
 
 To see what files differ between branches, you can use:
 ```bash
@@ -196,22 +153,39 @@ git diff --name-status main <branch_name>
 
 ```
 mae547-version-1/
-├── run_sim.py              # Main RRT path planning simulation
-├── rrt2d.py                # 2D RRT implementation
-├── rrt2drep.py             # RRT with replanning
-├── step1_inspect_joints.py # Joint inspection tutorial
-├── step2_interpolate_path.py
-├── step3_collision_check.py
-├── step4_rrt_planner.py
-├── step5_execute_rrt.py
-├── iris_prm.py             # IRIS-PRM path planning
-├── stretch_prm_nav.py      # PRM navigation
-├── stretch_mujoco/         # Main simulation package
-│   ├── stretch_mujoco_simulator.py
-│   ├── models/             # Robot and scene models
-│   └── ...
-├── examples/               # Example scripts
-└── pyproject.toml          # Project dependencies
+├── run_sim.py                    # Main RRT path planning simulation
+├── stretch_mujoco/               # Main simulation package
+│   ├── __init__.py
+│   ├── config.py                 # Configuration settings
+│   ├── stretch_mujoco_simulator.py  # Core simulator class
+│   ├── utils.py                  # Utility functions
+│   ├── mujoco_server.py          # MuJoCo server implementation
+│   ├── mujoco_server_passive.py  # Passive viewer server
+│   ├── mujoco_server_managed.py  # Managed viewer server
+│   ├── mujoco_server_camera_manager.py  # Camera management
+│   ├── mujoco_server_sensor_manager.py # Sensor management
+│   ├── datamodels/               # Data model classes
+│   │   ├── status_command.py
+│   │   ├── status_stretch_camera.py
+│   │   ├── status_stretch_joints.py
+│   │   └── status_stretch_sensors.py
+│   ├── enums/                    # Enumeration classes
+│   │   ├── actuators.py
+│   │   ├── stretch_cameras.py
+│   │   └── stretch_sensors.py
+│   └── models/                   # Robot and scene models
+│       ├── scene.xml             # Main scene configuration
+│       ├── stretch.xml           # Robot model definition
+│       ├── docking_station.xml    # Docking station model
+│       └── assets/               # 3D meshes, textures, and images
+│           ├── *.obj             # 3D mesh files
+│           ├── *.stl             # STL mesh files
+│           └── *.png             # Texture images
+├── pyproject.toml                # Project dependencies and configuration
+├── uv.lock                       # Dependency lock file
+├── README.md                     # This file
+├── CHANGELOG.md                  # Version history
+└── LICENSE                       # License file
 ```
 
 ## Troubleshooting
@@ -282,10 +256,7 @@ if __name__ == "__main__":
 
 ## Additional Resources
 
-- [Getting Started Tutorial (Colab)](https://colab.research.google.com/github/hello-robot/stretch_mujoco/blob/main/docs/getting_started.ipynb)
-- [Using the Mujoco Simulator with Stretch](./docs/using_mujoco_simulator_with_stretch.md)
-- [Contributing Guide](./docs/contributing.md)
-- [Changelog](./CHANGELOG.md)
+- [Changelog](./CHANGELOG.md) - Version history and changes
 
 ## Dependencies
 
