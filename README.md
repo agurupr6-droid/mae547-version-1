@@ -1,4 +1,4 @@
-# Stretch Mujoco
+# Stretch Mujoco - RRT Path Planning Simulation
 
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-31012/)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
@@ -6,212 +6,275 @@
 
 <img src="https://github.com/hello-robot/stretch_mujoco/raw/main/docs/images/stretch_mujoco.png" title="Stretch In Kitchen" width="100%">
 
-This library provides a simulation stack for Stretch, built on [MuJoCo](https://github.com/google-deepmind/mujoco). There is position control for the arm, head, and gripper joints, velocity control for mobile base, calibrated camera RGB + depth imagery, 2D spinning lidar scans, and more. There is a visualizer that supports [user interaction](https://youtu.be/2P-Dt-Jfd6U), or a more efficient headless mode. There is a [ROS2 package](https://github.com/hello-robot/stretch_ros2/tree/humble/stretch_simulation), built on this library, that works with Nav2, Web Teleop, and more. There is 100s of permutations of Robocasa-provided kitchen environments that Stretch can spawn into. The MuJoCo API can be used for features like deformables, procedural model generation, SDF collisions, cloth simulation, and more.
+This repository provides a simulation stack for the Stretch robot, built on [MuJoCo](https://github.com/google-deepmind/mujoco). The project includes position control for the arm, head, and gripper joints, velocity control for the mobile base, calibrated camera RGB + depth imagery, 2D spinning lidar scans, and more. This version includes RRT (Rapidly-exploring Random Tree) path planning algorithms for autonomous navigation with obstacle detection and avoidance.
 
-Check out the [highlight reel](https://www.youtube.com/watch?v=SWPJt67IB0Q) for features that have been recently added.
+## Features
 
+- **RRT Path Planning**: Implementation of RRT algorithms for collision-free path planning
+- **Obstacle Detection**: Real-time obstacle detection that stops the robot when a collision is detected
+- **Robot Simulation**: Full Stretch robot simulation with MuJoCo physics engine
+- **Position & Velocity Control**: Control arm, head, gripper, and mobile base
+- **Camera & Sensor Data**: Access to RGB, depth imagery, and lidar scans
+- **Visualizer Support**: Interactive visualizer or efficient headless mode
 
-## Getting Started
-Start with Google Colab:
+## Scenario Description (version_3 - Scenario 1)
 
- - Getting Started Tutorial [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/hello-robot/stretch_mujoco/blob/main/docs/getting_started.ipynb)
+In this scenario, the robot uses RRT path planning to navigate to a goal position. The robot continuously monitors its environment for obstacles. When the robot collides with or detects an obstacle, it immediately stops. The simulation ends when the robot stops due to obstacle collision.
 
-**or** follow these instructions on your computer:
+## Prerequisites
 
-First, install [`uv`](https://docs.astral.sh/uv/#getting-started). Uv is a package manager that we'll use to run this project.
+- Python 3.10 or higher
+- Git (for cloning the repository)
+- [uv](https://docs.astral.sh/uv/) package manager
 
-Then, clone this repo:
+## Setup Instructions
+
+### 1. Install uv Package Manager
+
+First, install `uv`, which is a fast Python package manager that will handle virtual environment creation and dependency management:
+
+**On Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**On macOS/Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+After installation, restart your terminal or reload your shell configuration.
+
+### 2. Clone the Repository
+
+Clone this repository:
+
+```bash
+git clone <repository-url>
+cd mae547-version-1
+```
+
+### 3. Set Up Virtual Environment and Install Dependencies
+
+The `uv` package manager automatically creates and manages a virtual environment for you. Simply run:
+
+```bash
+uv sync
+```
+
+This command will:
+- Create a virtual environment (`.venv` directory) automatically
+- Install all project dependencies from `pyproject.toml`
+- Install the project itself in editable mode
+
+> **Note**: `uv` handles virtual environment creation automatically. You don't need to manually create one with `python -m venv` or `virtualenv`.
+
+### 4. Verify Installation
+
+To verify everything is set up correctly, you can check the installed packages:
+
+```bash
+uv pip list
+```
+
+## Running the Simulation
+
+### Run RRT Path Planning Simulation
+
+To run the main RRT path planning simulation:
+
+```bash
+uv run run_sim.py
+```
+
+This script will:
+1. Start the simulator
+2. Plan a collision-free path using RRT algorithm
+3. Execute the path while detecting obstacles
+4. Stop immediately when an obstacle collision is detected
+
+Press `Ctrl+C` in the terminal to exit the simulation.
+
+## Switching Between Scenarios
+
+This repository contains multiple branches, each representing a different simulation scenario. You can switch between branches to access different scenarios:
+
+### Available Scenarios
+
+- **Scenario 1**: Available on the `version_3` branch (current branch)
+- **Scenario 2**: Available on the `version_2` branch
+- **Scenario 3**: Available on the `version_4` branch
+
+### How to Switch Branches
+
+1. **Check current branch:**
+   ```bash
+   git branch
+   ```
+
+2. **Switch to a different scenario branch:**
+   
+   For Scenario 1:
+   ```bash
+   git switch version_3
+   ```
+   
+   For Scenario 2:
+   ```bash
+   git switch version_2
+   ```
+   
+   For Scenario 3:
+   ```bash
+   git switch version_4
+   ```
+
+3. **After switching branches, reinstall dependencies:**
+   ```bash
+   uv sync
+   ```
+   
+   > **Note**: Different branches may have different dependencies or code changes. It's recommended to run `uv sync` after switching branches to ensure all dependencies are properly installed.
+
+4. **Run the simulation:**
+   ```bash
+   uv run run_sim.py
+   ```
+
+### Branch Differences
+
+Each branch contains scenario-specific modifications:
+- **version_2** (Scenario 2): Modified `run_sim.py` with scenario-specific parameters
+- **version_3** (Scenario 1): Modified `run_sim.py` with scenario-specific parameters - robot stops after colliding with obstacle
+- **version_4** (Scenario 3): Modified `run_sim.py` and `scene.xml` with scenario-specific parameters
+
+To see what files differ between branches, you can use:
+```bash
+git diff --name-status main <branch_name>
+```
+
+## Project Structure
 
 ```
-git clone https://github.com/hello-robot/stretch_mujoco --recurse-submodules
-cd stretch_mujoco
+mae547-version-1/
+├── run_sim.py                    # Main RRT path planning simulation
+├── stretch_mujoco/               # Main simulation package
+│   ├── __init__.py
+│   ├── config.py                 # Configuration settings
+│   ├── stretch_mujoco_simulator.py  # Core simulator class
+│   ├── utils.py                  # Utility functions
+│   ├── mujoco_server.py          # MuJoCo server implementation
+│   ├── mujoco_server_passive.py  # Passive viewer server
+│   ├── mujoco_server_managed.py  # Managed viewer server
+│   ├── mujoco_server_camera_manager.py  # Camera management
+│   ├── mujoco_server_sensor_manager.py # Sensor management
+│   ├── datamodels/               # Data model classes
+│   │   ├── status_command.py
+│   │   ├── status_stretch_camera.py
+│   │   ├── status_stretch_joints.py
+│   │   └── status_stretch_sensors.py
+│   ├── enums/                    # Enumeration classes
+│   │   ├── actuators.py
+│   │   ├── stretch_cameras.py
+│   │   └── stretch_sensors.py
+│   └── models/                   # Robot and scene models
+│       ├── scene.xml             # Main scene configuration
+│       ├── stretch.xml           # Robot model definition
+│       ├── docking_station.xml    # Docking station model
+│       └── assets/               # 3D meshes, textures, and images
+│           ├── *.obj             # 3D mesh files
+│           ├── *.stl             # STL mesh files
+│           └── *.png             # Texture images
+├── pyproject.toml                # Project dependencies and configuration
+├── uv.lock                       # Dependency lock file
+├── README.md                     # This file
+├── CHANGELOG.md                  # Version history
+└── LICENSE                       # License file
 ```
 
-> If you've already cloned the repo without `--recurse-submodules`, run `git submodule update --init` to pull the submodule.
+## Troubleshooting
 
-Lastly, run the simulation:
+### Build Error on Linux
 
+If you see a build error mentioning `evdev` on Linux, run:
+
+```bash
+sudo apt install python3-dev
 ```
-uv run launch_sim
-```
 
-> Note: If you see a build error mentioning `evdev` on linux, please run `sudo apt insall python3-dev`.
+### macOS Library Issues
 
-To exit, press `Ctrl+C` in the terminal.
+On macOS, if `mjpython` fails to locate `libpython3.10.dylib` and `libz.1.dylib`, run:
 
-<p>
-    <img src="https://github.com/hello-robot/stretch_mujoco/raw/main/docs/images/camera_streams.png" title="Camera Streams" height="250px">
-    <img src="https://github.com/hello-robot/stretch_mujoco/raw/main/docs/images/stretch3_in_mujoco.png" title="Camera Streams" height="250px">
-</p>
-
-> On MacOS, if `mjpython` fails to locate `libpython3.10.dylib` and `libz.1.dylib`, run these commands:
-```shell
-# Before proceeding, please reload your terminal and/or IDE window, to make sure the correct UV environment variables are loaded.
-
+```bash
+# Reload your terminal/IDE to ensure UV environment variables are loaded
 source .venv/bin/activate
 
-# When `libpython3.10.dylib` is missing, run:
+# When libpython3.10.dylib is missing:
 PYTHON_LIB_DIR=$(python3 -c 'from distutils.sysconfig import get_config_var; print(get_config_var("LIBDIR"))')
 ln -s "$PYTHON_LIB_DIR/libpython3.10.dylib" ./.venv/lib/libpython3.10.dylib
 
-# When `libz.1.dylib` is missing, run:
+# When libz.1.dylib is missing:
 export DYLD_LIBRARY_PATH=/usr/lib:$DYLD_LIBRARY_PATH
 ```
 
-## Example Scripts
+### Virtual Environment Activation (Optional)
 
-[Keyboard teleop](https://github.com/hello-robot/stretch_mujoco/tree/main/examples/keyboard_teleop.py)
+While `uv run` automatically uses the virtual environment, you can manually activate it if needed:
 
-```
-uv run examples/keyboard_teleop.py
-```
-
-[Gamepad teleop](https://github.com/hello-robot/stretch_mujoco/tree/main/examples/gamepad_teleop.py)
-
-Control Stretch in simulation using any xbox type gamepad (uses xinput)
-
-```
-uv run examples/gamepad_teleop.py
+**On Windows (PowerShell):**
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-[Robocasa environments](https://github.com/hello-robot/stretch_mujoco/tree/main/examples/robocasa_environment.py)
-
-```
-# Setup
-uv pip install -e ".[robocasa]"
-uv pip install -e "robocasa@third_party/robocasa"
-uv pip install -e "robosuite@third_party/robosuite"
-uv run third_party/robosuite/robosuite/scripts/setup_macros.py
-uv run third_party/robocasa/robocasa/scripts/setup_macros.py
-uv run third_party/robocasa/robocasa/scripts/download_kitchen_assets.py
-
-# Run sim
-uv run examples/robocasa_environment.py
+**On macOS/Linux:**
+```bash
+source .venv/bin/activate
 ```
 
-Ignore any warnings.
+## Writing Custom Code
 
-<img src="https://github.com/hello-robot/stretch_mujoco/raw/main/docs/images/robocasa_scene_1.png" title="Camera Streams" width="300px">
-<img src="https://github.com/hello-robot/stretch_mujoco/raw/main/docs/images/robocasa_scene_camera_data.png" title="Camera Streams" width="300px">
-
-## Writing Code
-
-Use the [StretchMujocoSimulator](https://github.com/hello-robot/stretch_mujoco/tree/main/stretch_mujoco/stretch_mujoco.py) class to:
-
- * start the simulation
- * position control the robot's ranged joints
- * velocity control the robot's mobile base
- * read joint states
- * read camera imagery
-
-Try the code below using `uv run ipython`. For advanced Mujoco users, the class also exposes the `mjModel` and `mjData`. See the [official Mujoco documentation](https://mujoco.readthedocs.io/en/stable/python.html).
+You can use the `StretchMujocoSimulator` class to interact with the simulation:
 
 ```python
 from stretch_mujoco import StretchMujocoSimulator
 
 if __name__ == "__main__":
     sim = StretchMujocoSimulator()
-    sim.start(headless=False) # This will open a Mujoco-Viewer window
+    sim.start(headless=False)  # Opens MuJoCo viewer window
     
-    # Poses
+    # Robot control
     sim.stow()
     sim.home()
-    
-    # Position Control 
     sim.move_to('lift', 1.0)
-    sim.move_by('head_pan', -1.1)
-    sim.move_by('base_translate', 0.1)
-
-    sim.wait_until_at_setpoint('lift')
-    sim.wait_while_is_moving('base_translate')
-    
-    # Base Velocity control
     sim.set_base_velocity(0.3, -0.1)
     
-    # Get Joint Status
-    from pprint import pprint
-    pprint(sim.pull_status())
-    """
-    Output:
-    {'time': 6.421999999999515,
-     'base': {'x_vel': -3.293721562016785e-07,'theta_vel': -3.061556698064456e-05},
-     'lift': {'pos': 0.5889703729548038, 'vel': 1.3548342274419937e-08},
-     'arm': {'pos': 0.09806380391427844, 'vel': -0.0001650879063921366},
-     'head_pan': {'pos': -4.968686850480367e-06, 'vel': 3.987855066304579e-08},
-     'head_tilt': {'pos': -0.00451929555883404, 'vel': -2.2404905787897265e-09},
-     'wrist_yaw': {'pos': 0.004738908190630005, 'vel': -5.8446467640096307e-05},
-     'wrist_pitch': {'pos': -0.0033446975569971366,'vel': -4.3182498418896415e-06},
-     'wrist_roll': {'pos': 0.0049449466225058416, 'vel': 1.27366845279872e-08},
-     'gripper': {'pos': -0.00044654737698173895, 'vel': -8.808287459130369e-07}}
-    """
-    
-    # Get Camera Frames
+    # Get status
+    status = sim.pull_status()
     camera_data = sim.pull_camera_data()
-    pprint(camera_data)
-    """
-    Output:
-    {'time': 80.89999999999286,
-     'cam_d405_rgb': array([[...]]),
-     'cam_d405_depth': array([[...]]),
-     'cam_d435i_rgb': array([[...]]),
-     'cam_d435i_depth': array([[...]]),
-     'cam_nav_rgb': array([[...]]),
-     'cam_d405_K': array([[...]]),
-     'cam_d435i_K': array([[...]])}
-    """
     
-    # Kills simulation process
     sim.stop()
 ```
 
-Note that the `if __name__ == "__main__":` guard is necessary, as explained in the [Python Docs](https://docs.python.org/3/library/multiprocessing.html#:~:text=For%20an%20explanation%20of%20why%20the%20if%20__name__%20%3D%3D%20%27__main__%27%20part%20is%20necessary%2C%20see%20Programming%20guidelines.).
+> **Important**: Always use the `if __name__ == "__main__":` guard when writing scripts, as explained in the [Python multiprocessing documentation](https://docs.python.org/3/library/multiprocessing.html).
 
-### Loading Robocasa Kitchen Scenes
+## Additional Resources
 
-The `stretch_mujoco.robocasa_gen.model_generation_wizard()` method gives you:
+- [Changelog](./CHANGELOG.md) - Version history and changes
 
-- Wizard/API to generate a kitchen model for a given task, layout, and style.
-- If layout and style are not provided, it will take you through a wizard to choose them in the terminal.
-- If robot_spawn_pose is not provided, it will spawn the robot to the default pose from robocasa fixtures.
-- You can also write the generated xml model with absolutepaths to a file.
+## Dependencies
 
-```python
-from stretch_mujoco import StretchMujocoSimulator
-from stretch_mujoco.robocasa_gen import model_generation_wizard
+Key dependencies (automatically installed with `uv sync`):
+- `mujoco==3.2.6` - Physics simulation engine
+- `opencv-python` - Computer vision
+- `matplotlib>=3.10.1` - Plotting and visualization
+- `hello-robot-stretch-urdf>=0.1.0` - Robot model definitions
+- And more (see `pyproject.toml` for complete list)
 
-# Use the wizard:
-model, xml, objects_info = model_generation_wizard()
+## License
 
-# Or, launch a specific task/layout/style
-model, xml = model_generation_wizard(
-    task=<task_name>,
-    layout=<layout_id>,
-    style=<style_id>,
-    wrtie_to_file=<filename>,
-)
+See [LICENSE](./LICENSE) file for details.
 
-sim = StretchMujocoSimulator(model=model)
-sim.start()
-```
+## Acknowledgments
 
-### ROS2
-
-You can use this simulation in ROS2 using the [`stretch_simulation` package](https://github.com/hello-robot/stretch_ros2/tree/humble/stretch_simulation) in `stretch_ros2`.
-
-### Docs
-
-Check out the following documentation resources:
-
-- [Using the Mujoco Simulator with Stretch](./docs/using_mujoco_simulator_with_stretch.md)
-- [Getting Started jupyter notebook](./docs/getting_started.ipynb)
-- [Releasing to PyPi](./docs/releasing_to_pypi.md)
-- [Contributing to this project](./docs/contributing.md)
-- [Changelog](./CHANGELOG.md)
-
-### Feature Requests and Bug reporting
-
-All enhancements/missing features/bugfixes are tracked by [Issues](https://github.com/hello-robot/stretch_mujoco/issues) filed. Please feel free to file an issue if you would like to report bugs or request a feature addition. Pull requests are welcome! Please see the [contributing guide](./docs/contributing.md).
-
-## Acknowledgment
-
-The assets in this repository contain significant contributions and efforts from [Kevin Zakka](https://github.com/kevinzakka) and [Google Deepmind](https://github.com/google-deepmind), along with others in Hello Robot Inc. who helped us in modeling Stretch in Mujoco. Thank you for your contributions.
+The assets in this repository contain significant contributions from [Kevin Zakka](https://github.com/kevinzakka) and [Google Deepmind](https://github.com/google-deepmind), along with others in Hello Robot Inc. who helped in modeling Stretch in MuJoCo.
