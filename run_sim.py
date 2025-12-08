@@ -385,7 +385,6 @@ def main() -> None:
 
     start_pose = sim.get_base_pose()
     start_xy = start_pose[:2]
-    start_heading = start_pose[2]
     goal_xy = BASE_GOAL_POSITION
 
     print("Planning RRT base path...")
@@ -408,23 +407,7 @@ def main() -> None:
     face_point(sim, OBJECT_POSITION, compensate_arm_offset=True)
     run_manipulation_sequence(sim)
 
-    print("Planning return path to start pose...")
-    try:
-        return_path = plan_rrt_path(sim.get_base_pose()[:2], start_xy, RRTParams())
-    except RuntimeError as err:
-        print(f"Return path planning failed: {err}")
-        print("Robot will stay near the object. Press ENTER to exit.")
-        input()
-        sim.stop()
-        return
-
-    returned_home = execute_base_path(sim, return_path, start_xy)
-    align_base_heading(sim, start_heading)
-
-    if returned_home:
-        print("Back at start pose with the block in hand. Press ENTER to exit.")
-    else:
-        print("Return path interrupted by obstacle detection. Press ENTER to exit.")
+    print("Object grasped successfully. Press ENTER to exit.")
     input()
     sim.stop()
 
